@@ -5,6 +5,8 @@
 #include <hw/reg.h>
 #include <magenta/types.h>
 #include <magenta/syscalls.h>
+#include <magenta/process.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,8 @@
 
 //#define TRACE 1
 #include "xhci-debug.h"
+
+#define PAGE_ROUNDUP(x) ((x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
 
 uint8_t xhci_endpoint_index(uint8_t ep_address) {
     if (ep_address == 0) return 0;
@@ -137,6 +141,7 @@ static mx_status_t xhci_claim_ownership(xhci_t* xhci) {
 
 mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     mx_status_t result = NO_ERROR;
+    mx_paddr_t* phys_addrs = NULL;
 
     list_initialize(&xhci->command_queue);
 
@@ -160,6 +165,10 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
 
     uint32_t scratch_pad_bufs = XHCI_GET_BITS32(hcsparams2, HCSPARAMS2_MAX_SBBUF_HI_START,
                                                 HCSPARAMS2_MAX_SBBUF_HI_BITS);
+    scratch_pad_bufs <<= HCSPARAMS2_MAX_SBBUF_LO_BITS;
+    scratch_pad_bufs |= XHCI_GET_BITS32(hcsparams2, HCSPARAMS2_MAX_SBBUF_LO_START,
+                                        HCSPARAMS2_MAX_SBBUF_LO_BITS);
+    xhci->page_size = XHCI_READ32(&xhci->op_regs->pagesize) << 12;
 
     // allocate array to hold our slots
     // add 1 to allow 1-based indexing of slots
@@ -190,37 +199,88 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     }
 
     // Allocate DMA memory for various things
-    xhci->dcbaa = xhci_memalign(xhci, 64, (xhci->max_slots + 1) * sizeof(uint64_t));
-    if (!xhci->dcbaa) {
-        result = ERR_NO_MEMORY;
+    xhci->buffer_size = 2 * PAGE_SIZE;  // one page for DCBAA and ERST array,
+                                        // and one page for input_context and device_descriptor
+    size_t scratch_pad_size = scratch_pad_bufs * sizeof(uint64_t);
+    if (scratch_pad_size > 0) {
+        xhci->buffer_size += PAGE_ROUNDUP(scratch_pad_size);
+        xhci->buffer_size += scratch_pad_bufs * xhci->page_size;
+    }
+
+    // if scratch_pad_size and the scratch pad pages fit in a page then we can use
+    // a non-contiguous buffer
+    bool contiguous = (scratch_pad_size > PAGE_SIZE) || (xhci->page_size > PAGE_SIZE);
+    if (contiguous) {
+        result = mx_vmo_create_contiguous(get_root_resource(), xhci->buffer_size, 0, &xhci->buffer_handle);
+    } else {
+        result = mx_vmo_create(xhci->buffer_size, 0, &xhci->buffer_handle);
+    }
+    if (result != NO_ERROR) {
+        printf("xhci_init: vmo_create failed: %d\n", result);
         goto fail;
     }
 
-    scratch_pad_bufs <<= HCSPARAMS2_MAX_SBBUF_LO_BITS;
-    scratch_pad_bufs |= XHCI_GET_BITS32(hcsparams2, HCSPARAMS2_MAX_SBBUF_LO_START,
-                                        HCSPARAMS2_MAX_SBBUF_LO_BITS);
-
-    if (scratch_pad_bufs > 0) {
-        xhci->scratch_pad = xhci_memalign(xhci, 64, scratch_pad_bufs * sizeof(uint64_t));
-        if (!xhci->scratch_pad) {
-            result = ERR_NO_MEMORY;
+    result = mx_vmar_map(mx_vmar_root_self(), 0, xhci->buffer_handle, 0, xhci->buffer_size,
+                         MX_VM_FLAG_PERM_READ | MX_VM_FLAG_PERM_WRITE, &xhci->buffer_virt);
+    if (result != NO_ERROR) {
+        printf("xhci_init: mx_vmar_map failed: %d\n", result);
+        goto fail;
+    }
+    if (!contiguous) {
+        // needs to be done before MX_VMO_OP_LOOKUP for non-contiguous VMOs
+        result = mx_vmo_op_range(xhci->buffer_handle, MX_VMO_OP_COMMIT, 0, xhci->buffer_size, NULL, 0);
+        if (result != NO_ERROR) {
+            printf("xhci_init: mx_vmo_op_range(MX_VMO_OP_COMMIT) failed %d\n", result);
             goto fail;
         }
-        uint32_t page_size = XHCI_READ32(&xhci->op_regs->pagesize) << 12;
-        xhci->page_size = page_size;
-
-        for (uint32_t i = 0; i < scratch_pad_bufs; i++) {
-            void* page = xhci_memalign(xhci, page_size, page_size);
-            if (!page) {
-                result = ERR_NO_MEMORY;
-                goto fail;
-            }
-            xhci->scratch_pad[i] = xhci_virt_to_phys(xhci, (mx_vaddr_t)page);
-        }
-        xhci->dcbaa[0] = xhci_virt_to_phys(xhci, (mx_vaddr_t)xhci->scratch_pad);
+    }
+    size_t phys_addr_size = (xhci->buffer_size / PAGE_SIZE) * sizeof(mx_paddr_t);
+    phys_addrs = malloc(phys_addr_size);
+    if (!phys_addrs) {
+        printf("xhci_init: could not allocate phys_addrs\n");
+        goto fail;
     }
 
-    result = xhci_transfer_ring_init(xhci, &xhci->command_ring, COMMAND_RING_SIZE);
+    result = mx_vmo_op_range(xhci->buffer_handle, MX_VMO_OP_LOOKUP, 0, xhci->buffer_size,
+                             phys_addrs, phys_addr_size);
+    if (result != NO_ERROR) {
+        printf("xhci_init: mx_vmo_op_range(MX_VMO_OP_LOOKUP) failed: %d\n", result);
+        goto fail;
+    }
+
+    // allocate one page for DCBAA and ERST array
+    xhci->dcbaa = (uint64_t *)xhci->buffer_virt;
+    xhci->dcbaa_phys = phys_addrs[0];
+    // DCBAA can only be 256 * sizeof(uint64_t) = 2048 bytes, so we have room for ERST array after DCBAA
+    mx_off_t erst_offset = 256 * sizeof(uint64_t);
+    xhci->erst_arrays[0] = (void *)xhci->dcbaa + erst_offset;
+    xhci->erst_arrays_phys[0] = xhci->dcbaa_phys + erst_offset;
+
+    mx_off_t buffer_offset = PAGE_SIZE;
+
+    if (scratch_pad_bufs > 0) {
+        // allocate scratch pad
+        uint64_t* scratch_pad = (uint64_t *)(xhci->buffer_virt + PAGE_SIZE);
+        xhci->dcbaa[0] = phys_addrs[1];
+        buffer_offset += PAGE_ROUNDUP(scratch_pad_size);
+
+        mx_off_t buffer_offset = PAGE_SIZE + PAGE_ROUNDUP(scratch_pad_size);
+        for (uint32_t i = 0; i < scratch_pad_bufs; i++) {
+            scratch_pad[i] = phys_addrs[buffer_offset / PAGE_SIZE];
+            buffer_offset += xhci->page_size;
+        }
+    } else {
+        xhci->dcbaa[0] = 0;
+    }
+
+    xhci->input_context = (uint8_t *)(xhci->buffer_virt + buffer_offset);
+    xhci->input_context_phys = phys_addrs[buffer_offset / PAGE_SIZE];
+    size_t input_context_size = xhci->context_size * XHCI_NUM_EPS;
+    // allocate device_descriptor buffer after input_context
+    xhci->device_descriptor = (usb_device_descriptor_t*)(xhci->input_context + input_context_size);
+    xhci->device_descriptor_phys = xhci->input_context_phys + input_context_size;
+
+    result = xhci_transfer_ring_init(&xhci->command_ring, COMMAND_RING_SIZE);
     if (result != NO_ERROR) {
         printf("xhci_command_ring_init failed\n");
         goto fail;
@@ -237,6 +297,8 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
         if (result != NO_ERROR) goto fail;
     }
 
+    free(phys_addrs);
+
     return NO_ERROR;
 
 fail:
@@ -246,16 +308,10 @@ fail:
     free(xhci->rh_map);
     free(xhci->rh_port_map);
     xhci_event_ring_free(xhci, 0);
-    xhci_transfer_ring_free(xhci, &xhci->command_ring);
-    if (xhci->scratch_pad) {
-        for (size_t i = 0; i < scratch_pad_bufs; i++) {
-            if (xhci->scratch_pad[i]) {
-                xhci_free(xhci, (void *)xhci_phys_to_virt(xhci, (mx_paddr_t)xhci->scratch_pad[i]));
-            }
-        }
-        xhci_free(xhci, xhci->scratch_pad);
-    }
-    xhci_free(xhci, xhci->dcbaa);
+    xhci_transfer_ring_free(&xhci->command_ring);
+    mx_vmar_unmap(xhci->buffer_handle, xhci->buffer_handle, xhci->buffer_size);
+    mx_handle_close(xhci->buffer_handle);
+    free(phys_addrs);
     free(xhci->slots);
     return result;
 }
@@ -264,7 +320,7 @@ static void xhci_update_erdp(xhci_t* xhci, int interruptor) {
     xhci_event_ring_t* er = &xhci->event_rings[interruptor];
     xhci_intr_regs_t* intr_regs = &xhci->runtime_regs->intr_regs[interruptor];
 
-    uint64_t erdp = xhci_virt_to_phys(xhci, (mx_vaddr_t)er->current);
+    uint64_t erdp = xhci_event_ring_current_phys(er);
     erdp |= ERDP_EHB; // clear event handler busy
     XHCI_WRITE64(&intr_regs->erdp, erdp);
 }
@@ -276,8 +332,7 @@ static void xhci_interruptor_init(xhci_t* xhci, int interruptor) {
 
     XHCI_SET32(&intr_regs->iman, IMAN_IE, IMAN_IE);
     XHCI_SET32(&intr_regs->erstsz, ERSTSZ_MASK, ERST_ARRAY_SIZE);
-    XHCI_WRITE64(&intr_regs->erstba, xhci_virt_to_phys(xhci,
-                                                       (mx_vaddr_t)xhci->event_rings[interruptor].erst_array));
+    XHCI_WRITE64(&intr_regs->erstba, xhci->erst_arrays_phys[interruptor]);
 }
 
 void xhci_wait_bits(volatile uint32_t* ptr, uint32_t bits, uint32_t expected) {
@@ -306,11 +361,11 @@ void xhci_start(xhci_t* xhci) {
     // setup operational registers
     xhci_op_regs_t* op_regs = xhci->op_regs;
     // initialize command ring
-    uint64_t crcr = xhci_virt_to_phys(xhci, (mx_vaddr_t)xhci->command_ring.start);
+    uint64_t crcr = xhci_transfer_ring_start_phys(&xhci->command_ring);
     crcr |= CRCR_RCS;
     XHCI_WRITE64(&op_regs->crcr, crcr);
 
-    XHCI_WRITE64(&op_regs->dcbaap, xhci_virt_to_phys(xhci, (mx_vaddr_t)xhci->dcbaa));
+    XHCI_WRITE64(&op_regs->dcbaap, xhci->dcbaa_phys);
     XHCI_SET_BITS32(&op_regs->config, CONFIG_MAX_SLOTS_ENABLED_START,
                     CONFIG_MAX_SLOTS_ENABLED_BITS, xhci->max_slots);
 
@@ -340,7 +395,7 @@ void xhci_post_command(xhci_t* xhci, uint32_t command, uint64_t ptr, uint32_t co
     XHCI_WRITE32(&trb->status, 0);
     trb_set_control(trb, command, control_bits);
 
-    xhci_increment_ring(xhci, cr);
+    xhci_increment_ring(cr);
 
     XHCI_WRITE32(&xhci->doorbells[0], 0);
 
@@ -348,7 +403,7 @@ void xhci_post_command(xhci_t* xhci, uint32_t command, uint64_t ptr, uint32_t co
 }
 
 static void xhci_handle_command_complete_event(xhci_t* xhci, xhci_trb_t* event_trb) {
-    xhci_trb_t* command_trb = xhci_read_trb_ptr(xhci, event_trb);
+    xhci_trb_t* command_trb = xhci_read_trb_ptr(&xhci->command_ring, event_trb);
     uint32_t cc = XHCI_GET_BITS32(&event_trb->status, EVT_TRB_CC_START, EVT_TRB_CC_BITS);
     xprintf("xhci_handle_command_complete_event slot_id: %d command: %d cc: %d\n",
             (event_trb->control >> TRB_SLOT_ID_START), trb_get_type(command_trb), cc);
