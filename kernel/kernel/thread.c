@@ -1577,18 +1577,21 @@ static status_t thread_read_stack(thread_t* t, void* ptr, void* out, size_t sz)
 
 void thread_print_backtrace(thread_t* t, void* fp)
 {
+    int n;
     void* pc;
+
     if (t == NULL) {
         return;
     }
-    for (int n = 0; n < 10; n++) {
+    for (n = 0; n < 10; n++) {
         if (thread_read_stack(t, fp + 8, &pc, sizeof(void*))) {
             break;
         }
-        printf("bt#%02d: %p\n", n, pc);
+        printf("bt#%02d: pc %p sp %p (magenta.elf)\n", n, pc, fp);
         if (thread_read_stack(t, fp, &fp, sizeof(void*))) {
             break;
         }
     }
+    printf("bt#%02d: end\n", n);
 }
 #endif

@@ -201,7 +201,7 @@ def main():
         # Strip any trailing carriage return character ("\r"), since
         # these appear in the serial console output from QEMU.
         line = line.rstrip()
-        if bt_end_re.match(line) or magenta_end_re.match(line):
+        if bt_end_re.match(line) or magenta_end_re.match(line) or end_of_file:
             if len(processed_lines) != 0:
                 writeline("\nstart of symbolized stack:\n")
                 writelines(processed_lines)

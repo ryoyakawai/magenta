@@ -77,10 +77,13 @@ void platform_halt(
 #if WITH_PANIC_BACKTRACE
     thread_print_backtrace(get_current_thread(), __GET_FRAME(0));
 #endif
-    dlog_bluescreen_halt();
 #endif
 
     printf("Halted\n");
+
+#if WITH_LIB_DEBUGLOG
+    dlog_bluescreen_halt();
+#endif
 
 #if ENABLE_PANIC_SHELL
     panic_shell_start();
