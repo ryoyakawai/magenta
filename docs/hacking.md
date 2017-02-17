@@ -52,6 +52,22 @@ EXTERNAL_KERNEL_DEFINES := ENABLE_KERNEL_LL_DEBUG=1
 
 More information on ``local.mk`` can be found via ``make help``
 
+## Bootloader Configuration
+
+gigaboot20x6 supports additional parameters that can be set via including them in
+a file called ``cmdline`` in the root if the partition gigaboot20x6 inhabits. Presently,
+all options take integer values.
+
+* ``smp.maxcpus`` The max number of CPUs for magenta to utilize.
+* ``bootloader.timeout`` How many seconds to wait at the gigaboot boot menu.
+* ``ktrace.bufsize`` How many MB to allocate for ktrace buffers.
+* ``ktrace.grpmask`` The group mask to use for trace entry filtering.
+
+e.g.
+```
+bootloader.timeout=0
+```
+
 ## Requesting a backtrace from within a program
 
 For debugging purposes, the system crashlogger can print backtraces by
