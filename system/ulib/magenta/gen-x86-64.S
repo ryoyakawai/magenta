@@ -15,7 +15,7 @@ m_syscall 4 mx_object_get_property 10
 m_syscall 4 mx_object_set_property 11
 m_syscall 6 mx_object_get_info 12
 m_syscall 4 mx_object_get_child 13
-m_syscall 4 mx_object_bind_exception_port 14
+m_syscall 4 mx_task_bind_exception_port 14
 m_syscall 3 mx_channel_create 15
 m_syscall 8 mx_channel_read 16
 m_syscall 6 mx_channel_write 17

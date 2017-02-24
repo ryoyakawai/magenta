@@ -15,7 +15,7 @@
 {11, 4, "object_set_property"},
 {12, 6, "object_get_info"},
 {13, 4, "object_get_child"},
-{14, 4, "object_bind_exception_port"},
+{14, 4, "task_bind_exception_port"},
 {15, 3, "channel_create"},
 {16, 8, "channel_read"},
 {17, 6, "channel_write"},

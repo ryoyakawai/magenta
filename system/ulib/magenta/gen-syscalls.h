@@ -89,7 +89,7 @@ __attribute__((visibility("hidden"))) extern mx_status_t VDSO_mx_object_get_chil
     mx_rights_t rights,
     mx_handle_t out[1]) __attribute__((__leaf__));
 
-__attribute__((visibility("hidden"))) extern mx_status_t VDSO_mx_object_bind_exception_port(
+__attribute__((visibility("hidden"))) extern mx_status_t VDSO_mx_task_bind_exception_port(
     mx_handle_t object,
     mx_handle_t eport,
     uint64_t key,

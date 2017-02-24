@@ -15,7 +15,7 @@
 #define MX_SYS_object_set_property 11
 #define MX_SYS_object_get_info 12
 #define MX_SYS_object_get_child 13
-#define MX_SYS_object_bind_exception_port 14
+#define MX_SYS_task_bind_exception_port 14
 #define MX_SYS_channel_create 15
 #define MX_SYS_channel_read 16
 #define MX_SYS_channel_write 17

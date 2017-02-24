@@ -74,7 +74,7 @@ mx_status_t sys_object_get_child(
     mx_rights_t rights,
     mx_handle_t out[1]);
 
-mx_status_t sys_object_bind_exception_port(
+mx_status_t sys_task_bind_exception_port(
     mx_handle_t object,
     mx_handle_t eport,
     uint64_t key,

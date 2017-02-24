@@ -74,7 +74,7 @@
         static_cast<mx_rights_t>(arg3),
         reinterpret_cast<mx_handle_t*>(arg4)));
         break;
-    case 14: ret = static_cast<uint64_t>(sys_object_bind_exception_port(
+    case 14: ret = static_cast<uint64_t>(sys_task_bind_exception_port(
         static_cast<mx_handle_t>(arg1),
         static_cast<mx_handle_t>(arg2),
         static_cast<uint64_t>(arg3),
