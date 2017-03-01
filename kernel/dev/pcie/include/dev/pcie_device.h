@@ -19,6 +19,7 @@
 #include <dev/pci_config.h>
 #include <kernel/mutex.h>
 #include <kernel/spinlock.h>
+#include <kernel/vm/vm_object.h>
 #include <mxtl/macros.h>
 #include <mxtl/ref_ptr.h>
 #include <mxtl/unique_ptr.h>
@@ -39,6 +40,7 @@ struct pcie_bar_info_t {
     bool     is_64bit;
     bool     is_prefetchable;
     uint     first_bar_reg;
+    mxtl::RefPtr<VmObject> vmo;
     RegionAllocator::Region::UPtr allocation;
 };
 

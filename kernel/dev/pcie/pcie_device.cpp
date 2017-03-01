@@ -16,6 +16,7 @@
 #include <kernel/mutex.h>
 #include <kernel/spinlock.h>
 #include <kernel/vm.h>
+#include <kernel/vm/vm_object.h>
 #include <list.h>
 #include <lk/init.h>
 #include <mxtl/limits.h>
@@ -502,6 +503,8 @@ status_t PcieDevice::ProbeBarLocked(uint bar_id) {
             bar_info.size = (uint32_t)(size_mask + 1);
             bar_info.bus_addr = addr_lo;
         }
+
+
     } else {
         /* PIO BAR */
         bar_info.size = ((uint32_t)(size_mask + 1)) & PCIE_PIO_ADDR_SPACE_MASK;
@@ -511,6 +514,21 @@ status_t PcieDevice::ProbeBarLocked(uint bar_id) {
     /* Restore the command register to its previous value */
     cfg_->Write(PciConfig::kCommand, backup);
 
+    // Create a VMO mapping for this MMIO bar to hand out to clients. In
+    // the event of PIO bars, the mx_pci_get_bar syscall will sort out
+    // the PIO details from the info structure.
+    if (bar_info.size > 0 && bar_info.is_mmio) {
+        auto vmo = VmObjectPhysical::Create(bar_info.bus_addr,
+                mxtl::max(bar_info.size, (uint64_t)PAGE_SIZE));
+        if (vmo == nullptr) {
+            TRACEF("Failed to allocate VMO for bar %u of device %02x:%02x:%01x!\n",
+                    bar_id, bus_id_, dev_id_, func_id_);
+            return ERR_NO_MEMORY;
+        }
+
+        // No cache policy is configured here so drivers may set it themselves
+        bar_info.vmo = vmo;
+    }
     /* Success */
     return NO_ERROR;
 }

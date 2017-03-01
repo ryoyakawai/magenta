@@ -90,6 +90,34 @@ static mx_status_t pci_map_interrupt(mx_device_t* dev, int which_irq, mx_handle_
     return NO_ERROR;
 }
 
+static mx_status_t pci_get_bar(mx_device_t* dev, uint32_t bar_num, mx_pci_resource_t* out_bar) {
+    mx_status_t status = NO_ERROR;
+
+    if (!dev || !out_bar) {
+        return ERR_INVALID_ARGS;
+    }
+
+    kpci_device_t* device = get_kpci_device(dev);
+    if (device->handle == MX_HANDLE_INVALID) {
+        return ERR_BAD_HANDLE;
+    }
+
+    status = mx_pci_get_bar(device->handle, bar_num, out_bar);
+    if (status != NO_ERROR) {
+        return status;
+    }
+
+#if __x86_64__
+    // x86 PIO space access requires permission in the I/O bitmap
+    if (out_bar->type == PCI_RESOURCE_TYPE_PIO) {
+        status = mx_mmap_device_io(get_root_resource(), out_bar->pio_addr, out_bar->size);
+    }
+#else
+    status = ERR_NOT_SUPPORTED;
+#endif
+    return status;
+}
+
 static mx_status_t pci_get_config(mx_device_t* dev,
                                   const pci_config_t** config,
                                   mx_handle_t* out_handle) {
@@ -149,6 +177,7 @@ static pci_protocol_t _pci_protocol = {
     .map_mmio = pci_map_mmio,
     .map_interrupt = pci_map_interrupt,
     .get_config = pci_get_config,
+    .get_bar = pci_get_bar,
     .query_irq_mode_caps = pci_query_irq_mode_caps,
     .set_irq_mode = pci_set_irq_mode,
 };

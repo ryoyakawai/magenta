@@ -112,6 +112,15 @@ status_t PciDeviceDispatcher::EnablePio(bool enable) {
     return NO_ERROR;
 }
 
+const pcie_bar_info_t* PciDeviceDispatcher::GetBar(uint32_t bar_num) {
+    AutoLock lock(&lock_);
+    DEBUG_ASSERT(device_ && device_->device());
+
+    if (!device_->claimed()) return nullptr;  // Are we not claimed yet?
+
+    return device_->device()->GetBarInfo(bar_num);
+}
+
 status_t PciDeviceDispatcher::ResetDevice() {
     canary_.Assert();
 
