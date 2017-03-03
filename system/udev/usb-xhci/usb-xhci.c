@@ -12,6 +12,7 @@
 #include <ddk/protocol/usb.h>
 
 #include <hw/reg.h>
+#include <magenta/process.h>
 #include <magenta/syscalls.h>
 #include <magenta/types.h>
 #include <stdio.h>
@@ -339,6 +340,7 @@ static mx_status_t usb_xhci_bind(mx_driver_t* drv, mx_device_t* dev, void** cook
     io_alloc_t* io_alloc = NULL;
     usb_xhci_t* uxhci = NULL;
     mx_status_t status;
+    mx_pci_resource_t bar;
 
     pci_protocol_t* pci_proto;
     if (device_get_protocol(dev, MX_PROTOCOL_PCI, (void**)&pci_proto)) {
@@ -364,23 +366,28 @@ static mx_status_t usb_xhci_bind(mx_driver_t* drv, mx_device_t* dev, void** cook
     //printf("VID %04X %04X\n", pci_config->vendor_id, pci_config->device_id);
 
     // map our MMIO
-    int bar = -1;
-    void* mmio;
-    uint64_t mmio_len;
+    void* mmio = NULL;
     /*
-     * TODO(cja): according to eXtensible Host Controller Interface revision 1.1, section 5, xhci
+     * eXtensible Host Controller Interface revision 1.1, section 5, xhci
      * should only use BARs 0 and 1. 0 for 32 bit addressing, and 0+1 for 64 bit addressing.
      */
-    for (size_t i = 0; i < PCI_MAX_BAR_COUNT; i++) {
-        status = pci_proto->map_mmio(dev, i, MX_CACHE_POLICY_UNCACHED_DEVICE, &mmio, &mmio_len, &mmio_handle);
-        if (status == NO_ERROR) {
-            bar = i;
-            break;
-        }
-    }
-    if (bar == -1) {
+    status = pci_proto->get_bar(dev, 0, &bar);
+    if (status != NO_ERROR) {
         printf("usb_xhci_bind could not find bar\n");
         status = ERR_INTERNAL;
+        goto error_return;
+    }
+
+    status = mx_vmo_set_cache_policy(bar.mmio_handle, MX_CACHE_POLICY_UNCACHED_DEVICE);
+    if (status!= NO_ERROR) {
+        printf("usb_xhci_bind Failed to set cache policy for bar: %d\n", status);
+        goto error_return;
+    }
+
+    status = mx_vmar_map(mx_vmar_root_self(), 0, bar.mmio_handle, 0, bar.size,
+            MX_VM_FLAG_PERM_READ | MX_VM_FLAG_PERM_WRITE, (uintptr_t*)&mmio);
+    if (status != NO_ERROR) {
+        printf("usb_xhci_bind failed to map vmo: %d\n", status);
         goto error_return;
     }
 
@@ -415,7 +422,7 @@ static mx_status_t usb_xhci_bind(mx_driver_t* drv, mx_device_t* dev, void** cook
 
     uxhci->io_alloc = io_alloc;
     uxhci->irq_handle = irq_handle;
-    uxhci->mmio_handle = mmio_handle;
+    uxhci->mmio_handle = bar.mmio_handle;
     uxhci->cfg_handle = cfg_handle;
     uxhci->pci_proto = pci_proto;
 
