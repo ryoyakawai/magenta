@@ -337,6 +337,10 @@ struct Syscall {
         return has_attribute("noreturn");
     }
 
+    bool is_blocking() const {
+        return has_attribute("blocking");
+    }
+
     bool validate() const {
         if (ret_spec.size() > 0 && is_noreturn()) {
             print_error("noreturn should have zero return arguments");
@@ -344,11 +348,13 @@ struct Syscall {
         } else if (ret_spec.size() > kMaxReturnArgs) {
             print_error("invalid number of return arguments");
             return false;
-        } else if (ret_spec.size() == 1) {
-            if (!ret_spec[0].name.empty()) {
-                print_error("single return arguments cannot be named");
-                return false;
-            }
+        } else if (ret_spec.size() == 1 && !ret_spec[0].name.empty()) {
+            print_error("single return arguments cannot be named");
+            return false;
+        } else if (is_blocking() &&
+                   (ret_spec.size() == 0 || ret_spec[0].type != "mx_status_t")) {
+            print_error("blocking should have first return be of type mx_status_t");
+            return false;
         }
         if (arg_spec.size() > kMaxInputArgs) {
             print_error("invalid number of input arguments");
@@ -404,6 +410,10 @@ struct Syscall {
         fprintf(stderr, "- args(s)\n");
         for (auto& a : arg_spec) {
             a.debug_dump();
+        }
+        fprintf(stderr, "- attrs(s)\n");
+        for (auto& a : attributes) {
+            fprintf(stderr, "  %s\n", a.c_str());
         }
     }
 
@@ -646,12 +656,19 @@ bool generate_kernel_code(std::ofstream& os, const Syscall& sc,
     if (sc.is_vdso())
         return true;
 
-    constexpr uint32_t indent_spaces = 8u;
+    uint32_t indent_spaces = 8u;
 
     auto syscall_name = syscall_prefix + sc.name;
 
     // case 0:
     os << "    case " << sc.index << ": ";
+
+    // If blocking, open a "while(true)" so we can retry on thread suspend
+    if (sc.is_blocking()) {
+        os << "\n" << string(indent_spaces, ' ') << "while (true) {\n";
+        indent_spaces += 4;
+        os << string(indent_spaces, ' ');
+    }
 
     // ret = static_cast<uint64_t>(syscall_whatevs(      )) -closer
     string close_invocation = invocation(os, return_var, return_type, syscall_name, sc);
@@ -672,7 +689,15 @@ bool generate_kernel_code(std::ofstream& os, const Syscall& sc,
     if (sc.is_noreturn()) {
         os << "; // __noreturn__\n";
     } else {
-        os << ";\n" << string(indent_spaces, ' ') << "break;\n";
+        os << ";\n";
+        if (sc.is_blocking()) {
+            os << string(indent_spaces, ' ') << "if (likely(static_cast<mx_status_t>(" << return_var <<
+               ") != ERR_SUSPEND_PENDING)) break;\n";
+            os << string(indent_spaces, ' ') << "thread_process_pending_signals();\n";
+            indent_spaces -= 4;
+            os << string(indent_spaces, ' ') << "}\n";
+        }
+        os << string(indent_spaces, ' ') << "break;\n";
     }
 
     return os.good();
