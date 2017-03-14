@@ -24,4 +24,9 @@
 // MOVE to kernel internal used for thread teardown
 #define ERR_INTERRUPTED (-502)
 
+// Used to interrupt blocking syscalls.  If the syscall entrypoint sees
+// this, it will attempt to suspend the thread and then retry the syscall
+// on resume.
+#define ERR_SUSPEND_PENDING (-503)
+
 #endif
