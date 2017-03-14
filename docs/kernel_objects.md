@@ -10,6 +10,8 @@ Magenta actively manages the following resources:
 
 + processor time
 + memory
+
+
 + device-io memory
 + interrupts
 + signaling and waiting
