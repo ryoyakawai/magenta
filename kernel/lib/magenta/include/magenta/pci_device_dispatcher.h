@@ -72,6 +72,7 @@ public:
     status_t EnableBusMaster(bool enable);
     status_t EnablePio(bool enable);
     const pcie_bar_info_t* GetBar(uint32_t bar_num);
+    status_t GetConfig(pci_config_info_t* out);
     status_t ResetDevice();
     status_t MapConfig(mxtl::RefPtr<Dispatcher>* out_mapping,
                        mx_rights_t* out_rights);
@@ -82,7 +83,6 @@ public:
     status_t MapInterrupt(int32_t which_irq,
                           mxtl::RefPtr<Dispatcher>* interrupt_dispatcher,
                           mx_rights_t* rights);
-    status_t GetBarVmo(uint32_t bar_num);
     status_t QueryIrqModeCaps(mx_pci_irq_mode_t mode, uint32_t* out_max_irqs);
     status_t SetIrqMode(mx_pci_irq_mode_t mode, uint32_t requested_irq_count);
 

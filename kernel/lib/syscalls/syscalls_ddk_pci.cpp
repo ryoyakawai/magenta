@@ -479,6 +479,10 @@ mx_status_t sys_pci_get_bar(mx_handle_t dev_handle, uint32_t bar_num, mx_pci_res
     return NO_ERROR;
 }
 
+mx_status_t sys_pci_get_config(mx_handle_t dev_handle, mx_pci_resource_t* out_config) {
+    return NO_ERROR;
+}
+
 mx_status_t sys_pci_io_write(mx_handle_t handle, uint32_t bar_num, uint32_t offset, uint32_t len,
                              uint32_t value) {
     /**
@@ -668,6 +672,10 @@ mx_status_t sys_pci_map_mmio(mx_handle_t, uint32_t, mx_cache_policy_t, mx_handle
 }
 
 mx_status_t sys_pci_get_bar(mx_handle_t, uint32_t, pci_resource_t**) {
+    return ERR_NOT_SUPPORTED;
+}
+
+mx_status_t sys_pci_get_config(mx_handle_t dev_handle, mx_pci_resource_t* out_config) {
     return ERR_NOT_SUPPORTED;
 }
 

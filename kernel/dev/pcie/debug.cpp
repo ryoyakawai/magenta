@@ -548,6 +548,11 @@ static bool dump_pcie_device(const mxtl::RefPtr<PcieDevice>& dev, void* ctx, uin
     if (params->verbose) {
         params->indent_level += 2;
 
+        if (dev->config_vmo()) {
+            LSPCI_PRINTF("Config VMO        : ");
+            dev->config_vmo()->Dump(0, false);
+        }
+
         dump_pcie_common(*dev, params);
         dump_pcie_bars(*dev, params);
 

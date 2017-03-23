@@ -151,6 +151,20 @@ status_t PcieDevice::InitLocked(PcieUpstreamNode& upstream) {
     if (res != NO_ERROR)
         return res;
 
+    // Map a VMO to the config if it's mappable via MMIO.
+    if (cfg_->addr_space() == PciAddrSpace::MMIO) {
+        auto vmo = VmObjectPhysical::Create(cfg_phys_, PAGE_SIZE);
+        if (vmo == nullptr) {
+            TRACEF("Failed to allocate VMO for config of device %02x:%02x:%01x!\n", bus_id_, dev_id_, func_id_);
+            return ERR_NO_MEMORY;
+        }
+
+        // Drivers will be mapping config read-only so it's safe to
+        // set appropriate policy here.
+        vmo->SetMappingCachePolicy(ARCH_MMU_FLAG_UNCACHED_DEVICE);
+        cfg_vmo_ = vmo;
+    }
+
     return NO_ERROR;
 }
 

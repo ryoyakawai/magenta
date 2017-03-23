@@ -31,6 +31,16 @@ class  PcieBusDriver;
 class  PcieUpstreamNode;
 
 /*
+ * struct used to fetch information about a config
+ */
+struct pci_config_info_t {
+    uint64_t size = 0;
+    uint64_t base_addr = 0;
+    bool     is_mmio;
+    mxtl::RefPtr<VmObject> vmo;
+};
+
+/*
  * struct used to fetch information about a configured base address register
  */
 struct pcie_bar_info_t {
@@ -283,6 +293,7 @@ public:
 
     const PciConfig*     config()      const { return cfg_; }
     paddr_t              config_phys() const { return cfg_phys_; }
+    mxtl::RefPtr<VmObject> config_vmo() const { return cfg_vmo_; }
     PcieBusDriver&       driver()            { return bus_drv_; }
 
     bool     plugged_in()     const { return plugged_in_; }
@@ -291,6 +302,7 @@ public:
     bool     quirks_done()    const { return quirks_done_; }
 
     bool     is_bridge()      const { return is_bridge_; }
+    bool     is_pcie()        const { return (pcie_ != nullptr); }
     uint16_t vendor_id()      const { return vendor_id_; }
     uint16_t device_id()      const { return device_id_; }
     uint8_t  class_id()       const { return class_id_; }
@@ -351,6 +363,7 @@ protected:
     PcieBusDriver& bus_drv_;        // Reference to our bus driver state.
     const PciConfig*         cfg_ = nullptr;  // Pointer to the memory mapped ECAM (kernel vaddr)
     paddr_t        cfg_phys_ = 0;   // The physical address of the device's ECAM
+    mxtl::RefPtr<VmObject> cfg_vmo_ = nullptr;
     SpinLock       cmd_reg_lock_;   // Protection for access to the command register.
     const bool     is_bridge_;      // True if this device is also a bridge
     const uint     bus_id_;         // The bus ID this bridge/device exists on
