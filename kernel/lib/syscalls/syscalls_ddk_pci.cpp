@@ -480,6 +480,29 @@ mx_status_t sys_pci_get_bar(mx_handle_t dev_handle, uint32_t bar_num, mx_pci_res
 }
 
 mx_status_t sys_pci_get_config(mx_handle_t dev_handle, mx_pci_resource_t* out_config) {
+    mxtl::RefPtr<PciDeviceDispatcher> pci_device;
+    mxtl::RefPtr<Dispatcher> dispatcher;
+    pci_config_info_t pci_config;
+    mx_status_t status;
+
+    // Grab the PCI device object
+    auto up = ProcessDispatcher::GetCurrent();
+    mx_status_t status = up->GetDispatcherWithRights(dev_handle, MX_RIGHT_WRITE, &pci_device);
+    if (status != NO_ERROR) return status;
+
+    status = pci_device->GetConfig(&out);
+    if (status != NO_ERROR) {
+        printf("failed to get config! %d\n", status);
+    } else {
+        printf("config\n"
+               "\tsize: %" PRIx64 "\n"
+               "\tbase_addr: %" PRIx64 "\n"
+               "\tis_mmio: %d\n",
+               out.size, out.base_addr, out.is_mmio);
+        if (out.vmo) {
+            out.vmo->Dump(4, false);
+        }
+    }
     return NO_ERROR;
 }
 

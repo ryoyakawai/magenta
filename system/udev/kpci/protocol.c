@@ -118,6 +118,24 @@ static mx_status_t pci_get_bar(mx_device_t* dev, uint32_t bar_num, mx_pci_resour
     return status;
 }
 
+static mx_status_t pci_get_config_vmo(mx_device_t* dev,
+                                    mx_pci_resource_t* out_config) {
+    if (!dev || !out_config) {
+        return ERR_INVALID_ARGS;
+    }
+
+    kpci_device_t* device = get_kpci_device(dev);
+    if (device->handle == MX_HANDLE_INVALID) {
+        return ERR_BAD_HANDLE;
+    }
+
+    mx_status_t status = mx_pci_get_config(device->handle, out_config);
+    if (status != NO_ERROR) {
+        return status;
+    }
+
+    return NO_ERROR;
+}
 static mx_status_t pci_get_config(mx_device_t* dev,
                                   const pci_config_t** config,
                                   mx_handle_t* out_handle) {
@@ -177,6 +195,7 @@ static pci_protocol_t _pci_protocol = {
     .map_mmio = pci_map_mmio,
     .map_interrupt = pci_map_interrupt,
     .get_config = pci_get_config,
+    .get_config_vmo = pci_get_config_vmo,
     .get_bar = pci_get_bar,
     .query_irq_mode_caps = pci_query_irq_mode_caps,
     .set_irq_mode = pci_set_irq_mode,

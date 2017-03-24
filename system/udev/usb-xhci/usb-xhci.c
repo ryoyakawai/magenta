@@ -371,6 +371,7 @@ static mx_status_t usb_xhci_bind(mx_driver_t* drv, mx_device_t* dev, void** cook
      * eXtensible Host Controller Interface revision 1.1, section 5, xhci
      * should only use BARs 0 and 1. 0 for 32 bit addressing, and 0+1 for 64 bit addressing.
      */
+    status = pci_proto->get_config_vmo(dev, &bar);
     status = pci_proto->get_bar(dev, 0, &bar);
     if (status != NO_ERROR) {
         printf("usb_xhci_bind could not find bar\n");
