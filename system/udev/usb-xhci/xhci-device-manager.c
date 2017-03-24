@@ -229,14 +229,15 @@ static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_addre
     }
 
     // read first 8 bytes of device descriptor to fetch ep0 max packet size
+    usb_device_descriptor_t device_descriptor;
     result = xhci_get_descriptor(xhci, slot_id, USB_TYPE_STANDARD, USB_DT_DEVICE << 8, 0,
-                                 xhci->device_descriptor_phys, 8);
+                                 &device_descriptor, 8);
     if (result != 8) {
         printf("xhci_get_descriptor failed\n");
         goto disable_slot_exit;
     }
 
-    int mps = xhci->device_descriptor->bMaxPacketSize0;
+    int mps = device_descriptor.bMaxPacketSize0;
     // enforce correct max packet size for ep0
     switch (speed) {
         case USB_SPEED_LOW:
@@ -619,7 +620,7 @@ mx_status_t xhci_configure_hub(xhci_t* xhci, uint32_t slot_id, usb_speed_t speed
         xprintf("USB_HUB_SET_DEPTH %d\n", depth);
         mx_status_t result = xhci_control_request(xhci, slot_id,
                                       USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_DEVICE,
-                                      USB_HUB_SET_DEPTH, depth, 0, (mx_paddr_t)NULL, 0);
+                                      USB_HUB_SET_DEPTH, depth, 0, NULL, 0);
         if (result < 0) {
             printf("USB_HUB_SET_DEPTH failed\n");
         }

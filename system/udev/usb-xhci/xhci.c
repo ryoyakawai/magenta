@@ -200,7 +200,7 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
 
     // Allocate DMA memory for various things
     xhci->buffer_size = 2 * PAGE_SIZE;  // one page for DCBAA and ERST array,
-                                        // and one page for input_context and device_descriptor
+                                        // and one page for input_context
     size_t scratch_pad_size = scratch_pad_bufs * sizeof(uint64_t);
     if (scratch_pad_size > 0) {
         xhci->buffer_size += PAGE_ROUNDUP(scratch_pad_size);
@@ -275,10 +275,6 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
 
     xhci->input_context = (uint8_t *)(xhci->buffer_virt + buffer_offset);
     xhci->input_context_phys = phys_addrs[buffer_offset / PAGE_SIZE];
-    size_t input_context_size = xhci->context_size * XHCI_NUM_EPS;
-    // allocate device_descriptor buffer after input_context
-    xhci->device_descriptor = (usb_device_descriptor_t*)(xhci->input_context + input_context_size);
-    xhci->device_descriptor_phys = xhci->input_context_phys + input_context_size;
 
     result = xhci_transfer_ring_init(&xhci->command_ring, COMMAND_RING_SIZE);
     if (result != NO_ERROR) {

@@ -252,37 +252,6 @@ mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* set
     return NO_ERROR;
 }
 
-int xhci_control_request(xhci_t* xhci, uint32_t slot_id, uint8_t request_type, uint8_t request,
-                         uint16_t value, uint16_t index, mx_paddr_t data, uint16_t length) {
-    xprintf("xhci_control_request slot_id: %d type: 0x%02X req: %d value: %d index: %d length: %d\n",
-            slot_id, request_type, request, value, index, length);
-
-    usb_setup_t setup;
-    setup.bmRequestType = request_type;
-    setup.bRequest = request;
-    setup.wValue = value;
-    setup.wIndex = index;
-    setup.wLength = length;
-
-    xhci_sync_transfer_t xfer;
-    xhci_sync_transfer_init(&xfer);
-
-    mx_status_t result = xhci_queue_transfer(xhci, slot_id, &setup, data, length, 0,
-                                             request_type & USB_DIR_MASK, 0, &xfer.context);
-    if (result != NO_ERROR)
-        return result;
-
-    result = xhci_sync_transfer_wait(&xfer);
-    xprintf("xhci_control_request returning %d\n", result);
-    return result;
-}
-
-mx_status_t xhci_get_descriptor(xhci_t* xhci, uint32_t slot_id, uint8_t type, uint16_t value,
-                                uint16_t index, mx_paddr_t phys_addr, uint16_t length) {
-    return xhci_control_request(xhci, slot_id, USB_DIR_IN | type | USB_RECIP_DEVICE,
-                                USB_REQ_GET_DESCRIPTOR, value, index, phys_addr, length);
-}
-
 void xhci_handle_transfer_event(xhci_t* xhci, xhci_trb_t* trb) {
     xprintf("xhci_handle_transfer_event: %08X %08X %08X %08X\n",
             ((uint32_t*)trb)[0], ((uint32_t*)trb)[1], ((uint32_t*)trb)[2], ((uint32_t*)trb)[3]);

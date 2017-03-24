@@ -112,8 +112,6 @@ struct xhci {
     // DMA buffers used by xhci_device_thread in xhci-device-manager.c
     uint8_t* input_context;
     mx_paddr_t input_context_phys;
-    usb_device_descriptor_t* device_descriptor;
-    mx_paddr_t device_descriptor_phys;
 
     // for xhci_get_current_frame()
     mtx_t mfindex_mutex;
@@ -152,3 +150,7 @@ inline bool xhci_is_root_hub(xhci_t* xhci, uint32_t device_id) {
 mx_status_t xhci_add_device(xhci_t* xhci, int slot_id, int hub_address, int speed);
 void xhci_remove_device(xhci_t* xhci, int slot_id);
 void xhci_process_deferred_txns(xhci_t* xhci, xhci_endpoint_t* ep, bool closed);
+mx_status_t xhci_control_request(xhci_t* xhci, uint32_t slot_id, uint8_t request_type, uint8_t request,
+                                 uint16_t value, uint16_t index, void* data, uint16_t length);
+mx_status_t xhci_get_descriptor(xhci_t* xhci, uint32_t slot_id, uint8_t type, uint16_t value,
+                                uint16_t index, void* data, uint16_t length);

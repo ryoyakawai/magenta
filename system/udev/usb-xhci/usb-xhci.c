@@ -73,6 +73,67 @@ void xhci_remove_device(xhci_t* xhci, int slot_id) {
     uxhci->bus_protocol->remove_device(uxhci->bus_device, slot_id);
 }
 
+static void xhci_control_complete(iotxn_t* txn, void* cookie) {
+    completion_signal((completion_t*)cookie);
+}
+
+int xhci_control_request(xhci_t* xhci, uint32_t slot_id, uint8_t request_type, uint8_t request,
+                         uint16_t value, uint16_t index, void* data, uint16_t length) {
+    usb_xhci_t* uxhci = xhci_to_usb_xhci(xhci);
+
+    xprintf("xhci_control_request slot_id: %d type: 0x%02X req: %d value: %d index: %d length: %d\n",
+            slot_id, request_type, request, value, index, length);
+
+    iotxn_t* txn;
+
+    mx_status_t status = iotxn_alloc(&txn, 0, length, 0);
+    if (status != NO_ERROR) return status;
+    txn->protocol = MX_PROTOCOL_USB;
+
+    usb_protocol_data_t* proto_data = iotxn_pdata(txn, usb_protocol_data_t);
+
+    usb_setup_t* setup = &proto_data->setup;
+    setup->bmRequestType = request_type;
+    setup->bRequest = request;
+    setup->wValue = value;
+    setup->wIndex = index;
+    setup->wLength = length;
+    proto_data->device_id = slot_id;
+    proto_data->ep_address = 0;
+    proto_data->frame = 0;
+
+    bool out = !!((request_type & USB_DIR_MASK) == USB_DIR_OUT);
+    if (length > 0 && out) {
+        txn->ops->copyto(txn, data, length, 0);
+    }
+
+    completion_t completion = COMPLETION_INIT;
+
+    txn->length = length;
+    txn->complete_cb = xhci_control_complete;
+    txn->cookie = &completion;
+    iotxn_queue(&uxhci->device, txn);
+    completion_wait(&completion, MX_TIME_INFINITE);
+
+    status = txn->status;
+    if (status == NO_ERROR) {
+        status = txn->actual;
+
+        if (length > 0 && !out) {
+            txn->ops->copyfrom(txn, data, txn->actual, 0);
+        }
+    }
+    txn->ops->release(txn);
+    xprintf("xhci_control_request returning %d\n", status);
+    return status;
+}
+
+mx_status_t xhci_get_descriptor(xhci_t* xhci, uint32_t slot_id, uint8_t type, uint16_t value,
+                                uint16_t index, void* data, uint16_t length) {
+    return xhci_control_request(xhci, slot_id, USB_DIR_IN | type | USB_RECIP_DEVICE,
+                                USB_REQ_GET_DESCRIPTOR, value, index, data, length);
+}
+
 static int xhci_irq_thread(void* arg) {
     usb_xhci_t* uxhci = (usb_xhci_t*)arg;
     xprintf("xhci_irq_thread start\n");
