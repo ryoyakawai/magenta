@@ -67,8 +67,8 @@ mx_status_t xhci_reset_endpoint(xhci_t* xhci, uint32_t slot_id, uint32_t endpoin
 }
 
 mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* setup, mx_paddr_t data,
-                        uint16_t length, int endpoint, int direction, uint64_t frame,
-                        xhci_transfer_context_t* context) {
+                                uint16_t length, int endpoint, int direction, uint64_t frame,
+                                iotxn_t* txn) {
     xprintf("xhci_queue_transfer slot_id: %d setup: %p endpoint: %d length: %d\n",
             slot_id, setup, endpoint, length);
 
@@ -145,7 +145,7 @@ mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* set
         return ERR_BUFFER_TOO_SMALL;
     }
 
-    list_add_tail(&ep->pending_requests, &context->node);
+    list_add_tail(&ep->pending_requests, &txn->node);
 
     if (setup) {
         // Setup Stage
@@ -211,7 +211,7 @@ mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* set
         // Follow up with event data TRB
         xhci_trb_t* trb = ring->current;
         xhci_clear_trb(trb);
-        trb_set_ptr(trb, context);
+        trb_set_ptr(trb, txn);
         XHCI_SET_BITS32(&trb->status, XFER_TRB_INTR_TARGET_START, XFER_TRB_INTR_TARGET_BITS, interruptor_target);
         trb_set_control(trb, TRB_TRANSFER_EVENT_DATA, XFER_TRB_IOC);
         print_trb(xhci, ring, trb);
@@ -235,7 +235,7 @@ mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* set
             // Follow up with event data TRB
             xhci_trb_t* trb = ring->current;
             xhci_clear_trb(trb);
-            trb_set_ptr(trb, context);
+            trb_set_ptr(trb, txn);
             XHCI_SET_BITS32(&trb->status, XFER_TRB_INTR_TARGET_START, XFER_TRB_INTR_TARGET_BITS, interruptor_target);
             trb_set_control(trb, TRB_TRANSFER_EVENT_DATA, XFER_TRB_IOC);
             print_trb(xhci, ring, trb);
@@ -243,7 +243,7 @@ mx_status_t xhci_queue_transfer(xhci_t* xhci, uint32_t slot_id, usb_setup_t* set
         }
     }
     // update dequeue_ptr to TRB following this transaction
-    context->dequeue_ptr = ring->current;
+    txn->protocol_data[5] = (uint64_t)ring->current;
 
     XHCI_WRITE32(&xhci->doorbells[slot_id], endpoint + 1);
 
@@ -272,17 +272,17 @@ void xhci_handle_transfer_event(xhci_t* xhci, xhci_trb_t* trb) {
 
     uint32_t cc = READ_FIELD(status, EVT_TRB_CC_START, EVT_TRB_CC_BITS);
     uint32_t length = READ_FIELD(status, EVT_TRB_XFER_LENGTH_START, EVT_TRB_XFER_LENGTH_BITS);
-    xhci_transfer_context_t* context = NULL;
+    iotxn_t* txn = NULL;
 
     // TRB pointer is zero in these cases
     if (cc != TRB_CC_RING_UNDERRUN && cc != TRB_CC_RING_OVERRUN) {
         if (control & EVT_TRB_ED) {
-            context = (xhci_transfer_context_t*)trb_get_ptr(trb);
+            txn = (iotxn_t *)trb_get_ptr(trb);
         } else {
             trb = xhci_read_trb_ptr(ring, trb);
             for (int i = 0; i < 5 && trb; i++) {
                 if (trb_get_type(trb) == TRB_TRANSFER_EVENT_DATA) {
-                    context = (xhci_transfer_context_t*)trb_get_ptr(trb);
+                    txn = (iotxn_t *)trb_get_ptr(trb);
                     break;
                 }
                 trb = xhci_get_next_trb(ring, trb);
@@ -319,8 +319,8 @@ void xhci_handle_transfer_event(xhci_t* xhci, xhci_trb_t* trb) {
             break;
     }
 
-    if (!context) {
-        printf("unable to find transfer context in xhci_handle_transfer_event\n");
+    if (!txn) {
+        printf("unable to find iotxn in xhci_handle_transfer_event\n");
         return;
     }
 
@@ -329,30 +329,34 @@ void xhci_handle_transfer_event(xhci_t* xhci, xhci_trb_t* trb) {
     // when transaction errors occur, we sometimes receive multiple events for the same transfer.
     // here we check to make sure that this event doesn't correspond to a transfer that has already
     // been completed. In the typical case, the context will be found at the head of pending_requests.
-    bool found_context = false;
-    xhci_transfer_context_t* test;
-    list_for_every_entry(&ep->pending_requests, test, xhci_transfer_context_t, node) {
-        if (test == context) {
-            found_context = true;
+    bool found_txn = false;
+    iotxn_t* test;
+    list_for_every_entry(&ep->pending_requests, test, iotxn_t, node) {
+        if (test == txn) {
+            found_txn = true;
             break;
         }
     }
-    if (!found_context) {
+    if (!found_txn) {
         printf("ignoring transfer event for completed transfer\n");
         mtx_unlock(&ring->mutex);
         return;
     }
 
     // update dequeue_ptr to TRB following this transaction
-    ring->dequeue_ptr = context->dequeue_ptr;
+    ring->dequeue_ptr = (xhci_trb_t *)txn->protocol_data[5];
 
-    // remove context from pending_requests
-    list_delete(&context->node);
+    // remove txn from pending_requests
+    list_delete(&txn->node);
 
     bool process_deferred_txns = !list_is_empty(&ep->deferred_txns);
     mtx_unlock(&ring->mutex);
 
-    context->callback(result, context->data);
+    if (result < 0) {
+        txn->ops->complete(txn, result, 0);
+    } else {
+        txn->ops->complete(txn, NO_ERROR, result);
+    }
 
     if (process_deferred_txns) {
         xhci_process_deferred_txns(xhci, ep, false);

@@ -227,22 +227,6 @@ usb_hci_protocol_t xhci_hci_protocol = {
     .reset_endpoint = xhci_reset_ep,
 };
 
-static void xhci_iotxn_callback(mx_status_t result, void* cookie) {
-    iotxn_t* txn = (iotxn_t*)cookie;
-    mx_status_t status;
-    size_t actual;
-
-    if (result > 0) {
-        actual = result;
-        status = NO_ERROR;
-    } else {
-        actual = 0;
-        status = result;
-    }
-
-    txn->ops->complete(txn, status, actual);
-}
-
 static mx_status_t xhci_do_iotxn_queue(xhci_t* xhci, iotxn_t* txn) {
     usb_protocol_data_t* data = iotxn_pdata(txn, usb_protocol_data_t);
     int rh_index = xhci_get_root_hub_index(xhci, data->device_id);
@@ -261,11 +245,7 @@ static mx_status_t xhci_do_iotxn_queue(xhci_t* xhci, iotxn_t* txn) {
     mx_paddr_t phys_addr;
     txn->ops->physmap(txn, &phys_addr);
 
-    // save a copy of our protocol data
-    usb_protocol_data_t proto_data;
-    memcpy(&proto_data, data, sizeof(proto_data));
-
-    usb_setup_t* setup = (ep_index == 0 ? &proto_data.setup : NULL);
+    usb_setup_t* setup = (ep_index == 0 ? &data->setup : NULL);
     uint8_t direction;
     if (setup) {
         direction = setup->bmRequestType & USB_ENDPOINT_DIR_MASK;
@@ -273,20 +253,10 @@ static mx_status_t xhci_do_iotxn_queue(xhci_t* xhci, iotxn_t* txn) {
         direction = data->ep_address & USB_ENDPOINT_DIR_MASK;
     }
 
-    // Now that we have read everything we need from the usb_protocol_data_t
-    // we can reuse this space for our xhci_transfer_context_t.
-    // We are operating on a clone of the iotxn from the driver so it is safe to do this.
-    static_assert(sizeof(xhci_transfer_context_t) <= sizeof(iotxn_proto_data_t), "");
-    xhci_transfer_context_t* context = iotxn_pdata(txn, xhci_transfer_context_t);
-    context->callback = xhci_iotxn_callback;
-    context->data = txn;
-
     mx_status_t status = xhci_queue_transfer(xhci, device_id, setup, phys_addr, txn->length,
-                               ep_index, direction, frame, context);
-    if (status == ERR_BUFFER_TOO_SMALL) {
-        // restore the protocol data, which was overwritten by our xhci_transfer_context_t
-        memcpy(data, &proto_data, sizeof(proto_data));
+                               ep_index, direction, frame, txn);
 
+    if (status == ERR_BUFFER_TOO_SMALL) {
         // add txn to deferred_txn list for later processing
         xhci_slot_t* slot = &xhci->slots[device_id];
         xhci_endpoint_t* ep = &slot->eps[ep_index];
